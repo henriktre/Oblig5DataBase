@@ -1,26 +1,37 @@
 <?php
-$exe = simplexml_load_file("SkierLogs.xml");
+$doc = new DOMDocument();
+$doc->load('SkierLogs.xml');
+$exe = new DOMXPath($doc);
+
 
 $pdo = new PDO('mysql:host=localhost;dbname=DBOblig5;charset=utf8mb4', 'root', '');
 
 parseClubs($exe);
+echo "20%\n";
 parseSeason($exe);
+echo "40%\n";
 parseSkiers($exe);
+echo "60%\n";
 parseLogs($exe);
+echo "80%\n";
 parseTotalDistance($exe);
+echo "100%\nDONE!\n\n";
+
+function getNode($item, $node){
+  return $item->getElementsByTagName($node)[0]->nodeValue;
+}
 
 function parseClubs($exe) {
   global $pdo;
-  $data = $exe->xpath("//SkierLogs/Clubs/Club");
+  $data = $exe->query("//SkierLogs/Clubs/Club");
 
   foreach ($data as $item) {
-    $row = simplexml_load_string($item->asXML());
-    $attributes = $row->attributes();
-    $id = $attributes->id;
-    $name = $row->Name;
-    $city = $row->City;
-    $county = $row->County;
 
+    $id = $item->getAttribute('id');
+    $name = getNode($item, 'Name');
+    $city = getNode($item, 'City');
+    $county = getNode($item, 'County');
+    //echo $id . " - " . $name . " - " . $city . " - " . $county . "\n"; //DEBUG
     $prepared = $pdo->prepare('INSERT INTO Clubs (clubId, name, city, county) VALUES (:clubId, :name, :city, :county)');
     $prepared->execute([
       ':clubId' => $id,
@@ -34,12 +45,11 @@ function parseClubs($exe) {
 
 function parseSeason($exe) {
   global $pdo;
-  $data = $exe->xpath("//SkierLogs/Season");
+  $data = $exe->query("//SkierLogs/Season");
 
   foreach ($data as $item) {
-    $row = simplexml_load_string($item->asXML());
-    $attributes = $row->attributes();
-    $fallYear = $attributes->fallYear;
+    $fallYear = $item->getAttribute('fallYear');
+    //echo $fallYear . "\n"; // DEBUG
 
     $prepared = $pdo->prepare('INSERT INTO Season (fallYear) VALUES (:fallYear)');
     $prepared->execute([
@@ -50,15 +60,14 @@ function parseSeason($exe) {
 
 function parseSkiers($exe) {
   global $pdo;
-  $data = $exe->xpath("//SkierLogs/Skiers/Skier");
+  $data = $exe->query("//SkierLogs/Skiers/Skier");
 
   foreach ($data as $item) {
-    $row = simplexml_load_string($item->asXML());
-    $attributes = $row->attributes();
-    $userName = $attributes->userName;
-    $firstName = $row->FirstName;
-    $lastName = $row->LastName;
-    $yearOfBirth = $row->YearOfBirth;
+    $userName = $item->getAttribute('userName');
+    $firstName = getNode($item, 'FirstName');
+    $lastName = getNode($item, 'LastName');
+    $yearOfBirth = getNode($item, 'YearOfBirth');
+    //echo $userName . " - " . $firstName . " - " . $lastName . " - " . $yearOfBirth . " - " . "\n"; //DEBUG
 
     $prepared = $pdo->prepare('INSERT INTO Skiers (userName, firstName, lastName, yearOfBirth) VALUES (:userName, :firstName, :lastName, :yearOfBirth)');
     $prepared->execute([
@@ -72,30 +81,26 @@ function parseSkiers($exe) {
 
 function parseLogs($exe) {
   global $pdo;
-  $data = $exe->xpath("//Season/Skiers");
-
+  $data = $exe->query("//Season/Skiers");
   foreach ($data as $item) {
-    $row = simplexml_load_string($item->asXML());
-    $seasonPath = $item->xpath("../@fallYear");
-    $fallYear = $seasonPath[0];
-    $clubAttributes = $row->attributes();
+    $seasonPath = $exe->query("../@fallYear", $item);
+    $fallYear = $seasonPath[0]->value;
+
     $clubId = "";
-    if(isset ($clubAttributes->clubId)) {
-      $clubId = $clubAttributes->clubId;
+    if ($item->hasAttribute('clubId')) {
+      $clubId = $item->getAttribute('clubId');
     }
-    $skiers = $item->xpath("Skier");
+
+    $skiers = $exe->query("Skier", $item);
 
     foreach ($skiers as $skier) {
-      $skierRow = simplexml_load_string($skier->asXML());
-      $skierAttributes = $skierRow->attributes();
-      $userName = $skierAttributes->userName;
-      $logs = $skier->xpath("Log/Entry");
+      $userName = $skier->getAttribute('userName');
+      $logs = $exe->query('Log/Entry', $skier);
 
       foreach ($logs as $log) {
-          $logRow = simplexml_load_string($log->asXML());
-          $date = $logRow->Date;
-          $area = $logRow->Area;
-          $distance = $logRow->Distance;
+          $date = getNode($log, 'Date');
+          $area = getNode($log, 'Area');
+          $distance = getNode($log, 'Distance');
           $prepared = $pdo->prepare('INSERT INTO Logs (season, clubId, userName, date, area, distance) VALUES (:season, :clubId, :userName, :date, :area, :distance)');
           $prepared->execute([
             ':season' => $fallYear,
@@ -112,20 +117,17 @@ function parseLogs($exe) {
 
 function parseTotalDistance($exe) {
   global $pdo;
-  $data = $exe->xpath("//Season/Skiers/Skier");
+  $data = $exe->query("//Season/Skiers/Skier");
 
   foreach ($data as $item) {
-    $row = simplexml_load_string($item->asXML());
-    $attributes = $row->attributes();
-    $userName = $attributes->userName;
-    $seasonPath = $item->xpath("../../@fallYear");
-    $fallYear = $seasonPath[0];
-    $totalDistances = $exe->xpath('//Season[@fallYear="'.$fallYear.'"]/Skiers/Skier[@userName="'.$userName.'"]/Log/Entry');
+    $userName = $item->getAttribute('userName');
+    $seasonPath = $exe->query("../../@fallYear", $item);
+    $fallYear = $seasonPath[0]->value;
+    $totalDistances = $exe->query('//Season[@fallYear="'.$fallYear.'"]/Skiers/Skier[@userName="'.$userName.'"]/Log/Entry');
     $distance = 0;
-    
+
     foreach($totalDistances as $totalDistance) {
-      $distanceRow = simplexml_load_string($totalDistance->asXML());
-      $distance += $distanceRow->Distance;
+      $distance += getNode($totalDistance, 'Distance');
     }
 
     $prepared = $pdo->prepare('INSERT INTO TotalDistance (userName, fallYear, totalDistance) VALUES (:userName, :fallYear, :totalDistance)');
